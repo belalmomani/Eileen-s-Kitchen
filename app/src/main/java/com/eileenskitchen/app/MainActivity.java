@@ -5,9 +5,11 @@ import android.content.Intent;
 import android.net.Uri;
 import android.os.Bundle;
 import android.webkit.*;
+import androidx.browser.customtabs.CustomTabsIntent;
 
 public class MainActivity extends Activity {
-    private static final String URL = "https://eileenskitchen.xo.je/";
+    private static final String HOST = "eileenskitchen.xo.je";
+    private static final String BASE = "https://" + HOST + "/";
     private WebView web;
     private ValueCallback<Uri[]> filePathCb;
 
@@ -24,9 +26,14 @@ public class MainActivity extends Activity {
         web.setWebViewClient(new WebViewClient() {
             @Override public boolean shouldOverrideUrlLoading(WebView v, WebResourceRequest r) {
                 Uri u = r.getUrl();
-                String sc = u.getScheme();
+                String sc = u.getScheme(), h = u.getHost() == null ? "" : u.getHost();
                 if ("http".equals(sc) || "https".equals(sc)) {
-                    if (u.getHost() != null && u.getHost().endsWith("eileenskitchen.xo.je")) return false;
+                    if (h.equals("accounts.google.com") || (h.endsWith(HOST) && u.getPath() != null && u.getPath().contains("/auth/google_login"))) {
+                        // Google يمنع الدخول داخل WebView، فنفتحه في Chrome Custom Tab
+                        openTab(Uri.parse(BASE + "auth/google_login.php?app=1"));
+                        return true;
+                    }
+                    if (h.endsWith(HOST)) return false;
                 }
                 try { startActivity(new Intent(Intent.ACTION_VIEW, u)); } catch (Exception e) {}
                 return true;
@@ -41,8 +48,28 @@ public class MainActivity extends Activity {
                 return true;
             }
         });
-        if (b == null) web.loadUrl(URL); else web.restoreState(b);
+        if (b != null) web.restoreState(b);
+        else if (!handleIntent(getIntent())) web.loadUrl(BASE);
     }
+
+    private void openTab(Uri u) {
+        try { new CustomTabsIntent.Builder().build().launchUrl(this, u); }
+        catch (Exception e) { startActivity(new Intent(Intent.ACTION_VIEW, u)); }
+    }
+
+    private boolean handleIntent(Intent i) {
+        Uri d = i == null ? null : i.getData();
+        if (d != null && "eileenskitchen".equals(d.getScheme())) {
+            String t = d.getQueryParameter("token");
+            if (t != null && t.matches("[a-f0-9]{64}")) {
+                web.loadUrl(BASE + "auth/app_exchange.php?token=" + t);
+                return true;
+            }
+        }
+        return false;
+    }
+
+    @Override protected void onNewIntent(Intent i) { super.onNewIntent(i); setIntent(i); handleIntent(i); }
 
     @Override protected void onActivityResult(int rq, int rs, Intent d) {
         if (rq == 1 && filePathCb != null) {
