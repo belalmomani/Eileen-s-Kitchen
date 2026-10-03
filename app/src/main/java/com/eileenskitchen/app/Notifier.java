@@ -10,7 +10,12 @@ import android.content.SharedPreferences;
 import android.os.Build;
 import android.webkit.CookieManager;
 import android.webkit.WebSettings;
+import android.os.Handler;
+import android.os.Looper;
+import android.widget.Toast;
 import androidx.core.app.NotificationCompat;
+import org.json.JSONArray;
+import org.json.JSONObject;
 import androidx.core.app.NotificationManagerCompat;
 import java.io.ByteArrayOutputStream;
 import java.io.InputStream;
@@ -74,11 +79,14 @@ final class Notifier {
         p.edit().putLong("reg_try", now).apply();
         new Thread(new Runnable() { public void run() {
             try {
-                org.json.JSONObject j = new org.json.JSONObject(get(c, "action=register"));
+                String raw = get(c, "action=register").trim();
+                if (!raw.startsWith("{")) { if (!toasted) { toasted = true; toast(c, "تعذّر تفعيل الإشعارات: ملف api/app_poll.php غير موجود أو محجوب على الخادم"); } return; }
+                JSONObject j = new JSONObject(raw);
                 if (j.optBoolean("ok")) {
                     p.edit().putString("token", j.getString("token")).putString("ln", j.optString("ln", "")).apply();
+                    toast(c, "تم تفعيل إشعارات الطلبات ✅");
                 }
-            } catch (Throwable t) {}
+            } catch (Throwable t) { if (!toasted) { toasted = true; toast(c, "تعذّر تفعيل الإشعارات (اتصال)"); } }
         }}).start();
     }
 
@@ -91,5 +99,39 @@ final class Notifier {
         new Thread(new Runnable() { public void run() {
             try { get(c, "action=revoke&token=" + tk); } catch (Throwable t) {}
         }}).start();
+    }
+
+    static boolean toasted = false;
+    static void toast(final Context c, final String m) {
+        new Handler(Looper.getMainLooper()).post(new Runnable() { public void run() { Toast.makeText(c, m, Toast.LENGTH_LONG).show(); } });
+    }
+
+    /** فحص واحد للخادم وعرض الجديد. يعيد false عند فشل الاتصال أو رد غير متوقع. */
+    static synchronized boolean pollOnce(Context c) {
+        SharedPreferences p = prefs(c);
+        try {
+            String tk = p.getString("token", "");
+            String raw = get(c, "action=poll&lb=" + p.getString("lb", "") + "&ln=" + p.getString("ln", "") + "&token=" + tk).trim();
+            if (!raw.startsWith("{")) return false;
+            JSONObject j = new JSONObject(raw);
+            if (!j.optBoolean("ok")) return false;
+            if (j.optBoolean("revoked")) p.edit().remove("token").remove("ln").apply();
+            JSONArray ns = j.optJSONArray("notifs");
+            for (int i = 0; ns != null && i < ns.length(); i++) {
+                JSONObject n = ns.getJSONObject(i);
+                show(c, CH_ORDERS, 1000000 + (n.optInt("id") % 1000000), n.optString("title"), n.optString("body"), BASE);
+            }
+            JSONArray bs = j.optJSONArray("broadcasts");
+            for (int i = 0; bs != null && i < bs.length(); i++) {
+                JSONObject b = bs.getJSONObject(i);
+                String u = b.optString("url", ""); 
+                show(c, CH_OFFERS, 2000000 + (b.optInt("id") % 1000000), b.optString("title"), b.optString("body"), u.isEmpty() || "null".equals(u) ? BASE : u);
+            }
+            SharedPreferences.Editor e = p.edit();
+            if (j.has("lb") && !j.isNull("lb")) e.putString("lb", j.optString("lb"));
+            if (!j.optBoolean("revoked") && j.has("ln") && !j.isNull("ln") && !tk.isEmpty()) e.putString("ln", j.optString("ln"));
+            e.apply();
+            return true;
+        } catch (Throwable t) { return false; }
     }
 }

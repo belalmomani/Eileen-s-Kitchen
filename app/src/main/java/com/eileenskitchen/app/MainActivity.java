@@ -4,6 +4,8 @@ import android.app.Activity;
 import android.content.Intent;
 import android.net.Uri;
 import android.os.Bundle;
+import android.os.Handler;
+import android.os.Looper;
 import android.webkit.*;
 import android.Manifest;
 import android.os.Build;
@@ -15,6 +17,11 @@ public class MainActivity extends Activity {
     private static final String HOST = "eileenskitchen.xo.je";
     private static final String BASE = "https://" + HOST + "/";
     private WebView web;
+    private final Handler loop = new Handler(Looper.getMainLooper());
+    private final Runnable pollLoop = new Runnable() { public void run() {
+        new Thread(new Runnable() { public void run() { Notifier.pollOnce(getApplicationContext()); } }).start();
+        loop.postDelayed(this, 30000);
+    }};
     private ValueCallback<Uri[]> filePathCb;
 
     @Override protected void onCreate(Bundle b) {
@@ -94,7 +101,8 @@ public class MainActivity extends Activity {
         return false;
     }
 
-    @Override protected void onPause() { super.onPause(); CookieManager.getInstance().flush(); }
+    @Override protected void onResume() { super.onResume(); loop.removeCallbacks(pollLoop); loop.postDelayed(pollLoop, 5000); }
+    @Override protected void onPause() { super.onPause(); loop.removeCallbacks(pollLoop); CookieManager.getInstance().flush(); }
 
     @Override protected void onNewIntent(Intent i) { super.onNewIntent(i); setIntent(i); handleIntent(i); }
 
